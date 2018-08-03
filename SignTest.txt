@@ -1,0 +1,366 @@
+import com.google.common.base.Strings;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.io.UnsupportedEncodingException;
+import java.security.MessageDigest;
+import java.util.*;
+
+/**
+ * @description: sign (测试)
+ * @date: 2018/7/25
+ * @modify_by:
+ */
+public class SignTest {
+
+    private static final String hexDigits[] = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f" };
+    private static final char[] legalChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".toCharArray();
+
+    public static void main(String[] args) {
+        RequestVO requestVO = new RequestVO();
+        requestVO.setAppKey("5ED4E9D706C2F016D27F3A474A17AAEA");
+        requestVO.setNonce("d55640d51b164926939d856ca1d9b038");
+        requestVO.setSign("14054ba9639f8ffe5bf0ab592e098556");
+        requestVO.setTimestamp("1520588770320");
+        requestVO.setTerminalType(1);
+        requestVO.setStart(1531388610000L);
+        requestVO.setEnd(1531388610000L);
+
+        Map<String, String> paramMap = new HashMap<String, String>();
+        paramMap.put("start", "1531388610000");
+        paramMap.put("end", "1531388610000");
+        paramMap.put("terminalType", "1");
+        try {
+            //签名
+            sign(requestVO, paramMap);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        System.out.println(paramMap);
+    }
+
+
+    /**
+     * 签名流程
+     * @param
+     * @return
+     * @throws Exception
+     */
+    public static void sign(BaseVO baseVO, Map<String,String> map) throws Exception{
+        //签名流程
+        //List<?> appKeyList = XmlConfigUtil.getValueList("service.business.appkey"); // 从配置文件获取appKey
+        List<String> appKeyList = Arrays.asList("5ED4E9D706C2F016D27F3A474A17AAEA"); //测试用
+        if(!appKeyList.contains(baseVO.getAppKey())){
+            //无效 APPKEY,110020
+            /*logger.error(new StringBuilder().append("AuthSigUtil invoke sign fail ")
+                    .append(ErrorMessageEnum.ERROR_NO_VALID_APPKEY.getErrMsg())
+                    .append(", params -> {}").toString(), JSON.toJSONString(map));*/
+
+            throw new Exception("无效 APPKEY");
+        }
+        //String appSecret = XmlConfigUtil.getValueString("service.business(" + appKeyList.indexOf(baseVO.getAppKey()) + ").appSecret"); // 从配置文件中获取
+        String appSecret = "EB5F64578E96B841302E8361B07550E5"; // 测试用
+        Map<Object, Object> paramMap = new HashMap<Object, Object>();
+        paramMap.putAll(map);
+        paramMap.put("appKey", baseVO.getAppKey());
+        paramMap.put("nonce", baseVO.getNonce());
+        paramMap.put("timestamp", baseVO.getTimestamp());
+        if(!auth(paramMap,appSecret,baseVO.getSign())){
+            /*//签名失败 ,110021
+            logger.error(new StringBuilder("AuthSigUtil invoke sign fail ")
+                    .append(ErrorMessageEnum.ERROR_SIGN_FAIL.getErrMsg())
+                    .append(", params -> {}").toString(),JSON.toJSONString(map));*/
+            throw new Exception("签名失败");
+        }
+    }
+
+    /**
+     * ECAR 验证 示例
+     * @param parm 请求参数，即参与签名计算的参数
+     * @param sign 原始签名
+     * @return
+     * @throws Exception
+     */
+    public static boolean auth(Map<Object,Object> parm,String appSecret,String sign) throws Exception {
+        //step 1 排序
+        SortedMap<Object, Object> parameters = new TreeMap<Object, Object>();
+        parameters.putAll(parm);
+        //step 2 获取 Base64
+        String base64Str = getBase64Str(parameters);
+        //step 3 获取加密key
+        String key = getKey(String.valueOf(parm.get("appKey")),appSecret);
+        //step 4 用key加密base64字符串,加密方式：将base64字符串用key进行HmacSHA1得到byte[],再进行md5处理。
+        String signStr = getSignStr(key,base64Str);
+        //step 5比较
+        if (signStr.equalsIgnoreCase(sign)){
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 获取base64字符串
+     * @param parameters
+     * @return
+     * @throws UnsupportedEncodingException
+     */
+    @SuppressWarnings("unchecked")
+    private static String getBase64Str(SortedMap<Object, Object> parameters) throws UnsupportedEncodingException {
+        StringBuffer sb = new StringBuffer();
+        Set es = parameters.entrySet();
+        Iterator it = es.iterator();
+        while (it.hasNext())
+        {
+            Map.Entry entry = (Map.Entry) it.next();
+            String k = (String) entry.getKey();
+            Object v = entry.getValue();
+            if (null != v && !"".equals(v))
+            {
+                sb.append(k + "=" + v + "&");
+            }
+        }
+        sb.deleteCharAt(sb.lastIndexOf("&"));
+        return encode(sb.toString().getBytes("UTF-8")).replaceAll(" ", "");
+    }
+
+    /**
+     * 编码
+     * @param data
+     * @return
+     */
+    public static String encode(byte[] data)
+    {
+        int start = 0;
+        int len = data.length;
+        StringBuffer buf = new StringBuffer(data.length * 3 / 2);
+
+        int end = len - 3;
+        int i = start;
+        int n = 0;
+
+        while (i <= end)
+        {
+            int d = ((((int) data[i]) & 0x0ff) << 16) | ((((int) data[i + 1]) & 0x0ff) << 8) | (((int) data[i + 2]) & 0x0ff);
+
+            buf.append(legalChars[(d >> 18) & 63]);
+            buf.append(legalChars[(d >> 12) & 63]);
+            buf.append(legalChars[(d >> 6) & 63]);
+            buf.append(legalChars[d & 63]);
+
+            i += 3;
+
+            if (n++ >= 14)
+            {
+                n = 0;
+                buf.append(" ");
+            }
+        }
+
+        if (i == start + len - 2)
+        {
+            int d = ((((int) data[i]) & 0x0ff) << 16) | ((((int) data[i + 1]) & 255) << 8);
+
+            buf.append(legalChars[(d >> 18) & 63]);
+            buf.append(legalChars[(d >> 12) & 63]);
+            buf.append(legalChars[(d >> 6) & 63]);
+            buf.append("=");
+        }
+        else if (i == start + len - 1)
+        {
+            int d = (((int) data[i]) & 0x0ff) << 16;
+
+            buf.append(legalChars[(d >> 18) & 63]);
+            buf.append(legalChars[(d >> 12) & 63]);
+            buf.append("==");
+        }
+
+        return buf.toString();
+    }
+
+
+    /**
+     * 获取key
+     * 注：第三方使用此方法
+     * @param appKey
+     * @param appSecret
+     * @return
+     */
+    private static String getKey(String appKey,String appSecret)
+    {
+        return appKey + appSecret;
+    }
+
+
+    /**
+     * @param key   加密key @see getKey方法
+     * @param base64Str 加密字符串
+     * @return
+     * @throws Exception
+     */
+    private static String getSignStr(String key, String base64Str) throws Exception
+    {
+        //step 1 构建以key为基准的HMAC_SHA1
+        Mac mac = Mac.getInstance("HmacSHA1");
+        SecretKeySpec secret = new SecretKeySpec(key.getBytes("UTF-8"), mac.getAlgorithm());
+        mac.init(secret);
+        //step 2 进行HmacSHA1处理
+        byte[] origin = mac.doFinal(base64Str.getBytes("UTF-8"));
+        //step 3 进行MD5处理
+        MessageDigest md = MessageDigest.getInstance("MD5");
+
+        byte[] b = md.digest(origin);
+        StringBuffer resultSb = new StringBuffer();
+        for (int i = 0; i < b.length; i++){
+            int n = b[i];
+            if (n < 0) n += 256;
+            int d1 = n / 16;
+            int d2 = n % 16;
+            resultSb.append(hexDigits[d1] + hexDigits[d2]);
+        }
+        return resultSb.toString();
+    }
+
+
+    /**
+     * 签名相关
+     */
+    static class BaseVO{
+        private String nonce;
+        private String timestamp;
+        private String appKey;
+        private String sign;
+
+
+        public String getNonce() {
+            return nonce;
+        }
+        public void setNonce(String nonce) {
+            this.nonce = nonce;
+        }
+        public String getTimestamp() {
+            return timestamp;
+        }
+        public void setTimestamp(String timestamp) {
+            this.timestamp = timestamp;
+        }
+        public String getAppKey() {
+            return appKey;
+        }
+        public void setAppKey(String appKey) {
+            this.appKey = appKey;
+        }
+        public String getSign() {
+            return sign;
+        }
+        public void setSign(String sign) {
+            this.sign = sign;
+        }
+
+        public boolean checkParams(){
+            if (Strings.isNullOrEmpty(nonce) || Strings.isNullOrEmpty(timestamp) || Strings.isNullOrEmpty(appKey) || Strings.isNullOrEmpty(sign)) {
+                return false;
+            }
+            return true;
+        }
+
+        @Override
+        public String toString() {
+            return "nonce=" + nonce + ", timestamp=" + timestamp + ", appKey=" + appKey + ", sign=" + sign;
+        }
+    }
+
+    /**
+     * 签名相关
+     */
+    static class RequestVO extends BaseVO{
+        private int id;
+        private String searchDate;
+        private String sort;
+        private Long start;
+        private Long end;
+        private int terminalType;
+        private String seatGroup;
+        private int page;
+        private int rows;
+        private String order;
+
+        public int getPage() {
+            return page;
+        }
+
+        public void setPage(int page) {
+            this.page = page;
+        }
+
+        public int getRows() {
+            return rows;
+        }
+
+        public void setRows(int rows) {
+            this.rows = rows;
+        }
+
+        public String getOrder() {
+            return order;
+        }
+
+        public void setOrder(String order) {
+            this.order = order;
+        }
+
+        public String getSeatGroup() {
+            return seatGroup;
+        }
+
+        public void setSeatGroup(String seatGroup) {
+            this.seatGroup = seatGroup;
+        }
+
+        public int getTerminalType() {
+            return terminalType;
+        }
+
+        public void setTerminalType(int terminalType) {
+            this.terminalType = terminalType;
+        }
+
+        public Long getStart() {
+            return start;
+        }
+
+        public void setStart(Long start) {
+            this.start = start;
+        }
+
+        public Long getEnd() {
+            return end;
+        }
+
+        public void setEnd(Long end) {
+            this.end = end;
+        }
+
+        public int getId() {
+            return id;
+        }
+
+        public void setId(int id) {
+            this.id = id;
+        }
+
+        public String getSearchDate() {
+            return searchDate;
+        }
+
+        public void setSearchDate(String searchDate) {
+            this.searchDate = searchDate;
+        }
+
+        public String getSort() {
+            return sort;
+        }
+
+        public void setSort(String sort) {
+            this.sort = sort;
+        }
+    }
+}
